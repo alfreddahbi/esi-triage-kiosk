@@ -109,7 +109,7 @@ select{background:#0a1517;border:1px solid var(--line);color:var(--text);border-
 .stamp{margin-top:10px;padding:10px;border-radius:10px;background:rgba(48,164,108,.12);border:1px solid rgba(48,164,108,.5);font-weight:700;display:none}
 .errbar{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#3a1214;border:1px solid var(--bad);color:#ffd0d0;padding:10px 16px;border-radius:12px;font-size:14px;z-index:30;display:none;max-width:90vw}
 @media (max-width:1100px){main{grid-template-columns:1fr 1fr}.colCam{grid-column:1/3;order:-1}}
-@media (max-width:720px){main{grid-template-columns:1fr;padding:12px}.colCam{grid-column:auto}.poc{display:none}.ring{width:150px;height:150px}}
+@media (max-width:720px){main{grid-template-columns:1fr;padding:12px}.colCam{grid-column:auto;order:0}.camBox{aspect-ratio:3/4;max-height:52vh;margin:0 auto}.poc{display:none}.ring{width:150px;height:150px}}
 @media print{.topbar,.overlay:not(#result),main,.errbar,.noprint{display:none!important}#result{position:static;background:#fff;display:block}.modal{max-height:none;border:none;color:#000;background:#fff}.modal p,.sec div,.sec ul{color:#000}}
 </style>
 </head>
@@ -279,35 +279,52 @@ $("startBtn").onclick = async () => {
     S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     const src = S.audioCtx.createMediaStreamSource(S.stream);
     S.analyser = S.audioCtx.createAnalyser(); S.analyser.fftSize = 2048; src.connect(S.analyser);
-    initFace();
+    await Promise.race([initFace(), new Promise(r=>setTimeout(r,8000))]);
   }
   speechSynthesis.getVoices();
   S.startTime = Date.now(); setInterval(tick,1000);
   requestAnimationFrame(loop);
-  callClaude("SESSION START: greet the patient and ask the first question.");
+  setState("thinking","Scanning face");
+  await new Promise(r=>setTimeout(r,2000));
+  callClaude("SESSION START: greet the patient and ask the first question. Voice data will only exist after the patient speaks, that is expected.");
 };
 function tick(){ const s=Math.floor((Date.now()-S.startTime)/1000); $("timer").textContent=String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); }
 
 /* ---------- Face tracking ---------- */
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+async function makeLandmarker(fs, delegate){
+  return FaceLandmarker.createFromOptions(fs, {
+    baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate },
+    outputFaceBlendshapes:true, runningMode:"VIDEO", numFaces:1,
+    minFaceDetectionConfidence:0.3, minFacePresenceConfidence:0.3, minTrackingConfidence:0.3
+  });
+}
 async function initFace(){
+  $("hudFace").textContent="Loading face model";
   try {
     const fs = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-    S.landmarker = await FaceLandmarker.createFromOptions(fs, {
-      baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate:"GPU" },
-      outputFaceBlendshapes:true, runningMode:"VIDEO", numFaces:1
-    });
+    S.fs = fs; S.delegate = IS_MOBILE ? "CPU" : "GPU";
+    try { S.landmarker = await makeLandmarker(fs, S.delegate); }
+    catch(e){ S.delegate="CPU"; S.landmarker = await makeLandmarker(fs, "CPU"); }
     S.du = new DrawingUtils($("mesh").getContext("2d"));
   } catch(e) { $("hudFace").textContent="Face tracking unavailable"; $("hudFace").className="chip bad"; console.error(e); }
+}
+// If the GPU delegate keeps missing a face for a long time on this device, switch to CPU once
+async function fallbackToCPU(){
+  if (S.delegate==="CPU" || S.switching || !S.fs) return;
+  S.switching=true;
+  try { const lm = await makeLandmarker(S.fs,"CPU"); S.landmarker?.close?.(); S.landmarker=lm; S.delegate="CPU"; S.missCount=0; } catch(e){ console.error(e); }
+  S.switching=false;
 }
 
 function loop(){
   S.frame++;
   const v=$("video");
-  if (S.landmarker && v.readyState>=2 && v.currentTime!==S.lastVideoTime) {
-    S.lastVideoTime=v.currentTime;
-    const c=$("mesh"); if(c.width!==v.videoWidth){ c.width=v.videoWidth; c.height=v.videoHeight; }
-    const res = S.landmarker.detectForVideo(v, performance.now());
-    processFace(res, c);
+  const tNow = performance.now();
+  if (S.landmarker && !S.switching && v.readyState>=2 && v.videoWidth && v.currentTime!==S.lastVideoTime && tNow-(S.lastDetect||0) > (S.delegate==="CPU"?45:0)) {
+    S.lastVideoTime=v.currentTime; S.lastDetect=tNow;
+    const c=$("mesh"); if(c.width!==v.videoWidth || c.height!==v.videoHeight){ c.width=v.videoWidth; c.height=v.videoHeight; }
+    try { processFace(S.landmarker.detectForVideo(v, tNow), c); } catch(e){ console.error(e); }
   }
   if (S.analyser && S.frame%2===0) processAudio();
   animateMouth();
@@ -315,11 +332,16 @@ function loop(){
 }
 
 function processFace(res, c){
-  const ctx=c.getContext("2d"); ctx.clearRect(0,0,c.width,c.height);
+  const ctx=c.getContext("2d");
   const lm = res.faceLandmarks && res.faceLandmarks[0];
   const now = performance.now();
-  if (!lm) { S.faceSeen=false; $("hudFace").textContent="Face: not detected"; $("hudFace").className="chip warn"; setM("face","No",0,"warn"); S.faceHist.push({t:now,present:false}); trimHist(now); return; }
-  S.faceSeen=true;
+  if (!lm) {
+    S.missCount=(S.missCount||0)+1;
+    if (S.delegate==="GPU" && S.missCount>90 && !S.everSeen) fallbackToCPU();
+    if (S.missCount<12) return; // brief dropouts: keep last overlay and readings
+    ctx.clearRect(0,0,c.width,c.height); S.faceSeen=false; $("hudFace").textContent="Face: not detected"; $("hudFace").className="chip warn"; setM("face","No",0,"warn"); S.faceHist.push({t:now,present:false}); trimHist(now); return; }
+  S.faceSeen=true; S.everSeen=true; S.missCount=0;
+  ctx.clearRect(0,0,c.width,c.height);
   S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {color:"rgba(54,214,195,0.22)", lineWidth:0.6});
   S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, {color:"#36d6c3", lineWidth:1.6});
   S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS, {color:"#ff8f8f", lineWidth:1.6});
@@ -334,6 +356,8 @@ function processFace(res, c){
   ctx.beginPath(); ctx.moveTo(eL.x,eL.y); ctx.lineTo(eR.x,eR.y); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mR.x,mR.y); ctx.stroke(); ctx.setLineDash([]);
   const eyeAng = Math.atan2(eR.y-eL.y, eR.x-eL.x), mouthAng = Math.atan2(mR.y-mL.y, mR.x-mL.x);
   let droop = (mouthAng-eyeAng)*180/Math.PI;
+  if (droop>90) droop-=180; if (droop<-90) droop+=180;
+  if (!isFinite(droop)) droop = 0;
   const iod = Math.hypot(eR.x-eL.x, eR.y-eL.y);
   const browL = (P(159).y - P(105).y)/iod, browR = (P(386).y - P(334).y)/iod;
 
@@ -361,7 +385,7 @@ function processFace(res, c){
 
   if (S.collect) S.collect.samples.push({smileMag,browMag,smileAsym,browAsym,droop,browDiff:browL-browR});
 
-  const e = (k,v,a=0.2)=> S.ema[k] = S.ema[k]==null ? v : S.ema[k]*(1-a)+v*a;
+  const e = (k,v,a=0.2)=> { if(!isFinite(v)) return S.ema[k]??0; return S.ema[k] = (S.ema[k]==null || !isFinite(S.ema[k])) ? v : S.ema[k]*(1-a)+v*a; };
   const dd=e("droop",droop), sa=e("sa",smileAsym), ba=e("ba",browAsym), eo=e("eo",eyeOpen), gr=e("gr",grimace);
   setM("face","Yes",100,"");
   setM("droop", r1(dd)+"°", Math.abs(dd)*12, Math.abs(dd)>5?"bad":Math.abs(dd)>3?"warn":"");
