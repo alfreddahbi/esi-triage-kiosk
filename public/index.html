@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ESI Triage Kiosk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#081113; --panel:#0f1c1f; --panel2:#132428; --line:#1e3439; --text:#e7f2f1; --muted:#87a3a4;
+  --accent:#36d6c3; --accent2:#7ce7da; --warn:#f5b84b; --bad:#ff6b6b;
+  --esi1:#e5484d; --esi2:#f76b15; --esi3:#f5c400; --esi4:#30a46c; --esi5:#3e8ef7;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:Manrope,system-ui,sans-serif}
+body{min-height:100vh;background:radial-gradient(1200px 600px at 70% -10%,#0f2a2c 0%,transparent 60%),var(--bg)}
+button{font-family:inherit;cursor:pointer}
+.topbar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);background:rgba(8,17,19,.85);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
+.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#1a8f86);display:grid;place-items:center;font-weight:800;color:#04201d}
+.title{font-weight:800;letter-spacing:.2px}
+.title small{display:block;font-weight:500;color:var(--muted);font-size:12px}
+.poc{margin-left:auto;font-size:12px;font-weight:700;color:#ffd9a0;background:rgba(245,184,75,.12);border:1px solid rgba(245,184,75,.35);padding:6px 10px;border-radius:999px}
+.timer{font-family:var(--mono);font-size:13px;color:var(--muted)}
+main{display:grid;grid-template-columns:minmax(280px,1fr) minmax(360px,1.35fr) minmax(300px,1fr);gap:16px;padding:16px 20px;max-width:1600px;margin:0 auto}
+.card{background:linear-gradient(180deg,var(--panel),#0c1719);border:1px solid var(--line);border-radius:18px;padding:16px;position:relative}
+.card h3{margin:0 0 12px;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.live{background:var(--bad);box-shadow:0 0 0 0 rgba(255,107,107,.7);animation:pulse 1.6s infinite}
+@keyframes pulse{70%{box-shadow:0 0 0 8px rgba(255,107,107,0)}100%{box-shadow:0 0 0 0 rgba(255,107,107,0)}}
+
+/* Avatar */
+.avatarWrap{display:flex;flex-direction:column;align-items:center;gap:10px}
+.ring{width:190px;height:190px;border-radius:50%;padding:6px;background:conic-gradient(var(--line),var(--line));transition:.3s}
+.ring.speaking{background:conic-gradient(from var(--a,0deg),var(--accent),transparent 40%,var(--accent) 80%);animation:spin 2.2s linear infinite}
+.ring.listening{background:conic-gradient(#ff8f8f,#ff6b6b)}
+.ring.thinking{background:conic-gradient(from var(--a,0deg),var(--warn),transparent 50%,var(--warn));animation:spin 1.2s linear infinite}
+@property --a{syntax:'<angle>';inherits:false;initial-value:0deg}
+@keyframes spin{to{--a:360deg}}
+.ring svg{width:100%;height:100%;border-radius:50%;background:#10292b;display:block}
+#eyes{animation:blink 5s infinite;transform-origin:100px 96px}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+.state{font-size:13px;font-weight:700;color:var(--accent2);min-height:18px}
+.caption{width:100%;min-height:84px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px;font-size:18px;line-height:1.45;font-weight:600}
+.caption .who{display:block;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;font-weight:700}
+.interim{width:100%;min-height:24px;color:#ffb3b3;font-size:15px;font-style:italic}
+.talkRow{display:flex;gap:8px;width:100%}
+.talkRow input{flex:1;background:#0a1517;border:1px solid var(--line);border-radius:12px;color:var(--text);padding:11px 12px;font-family:inherit;font-size:14px}
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:10px 14px;border-radius:12px;font-weight:700;font-size:14px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#04201d;border-color:var(--accent)}
+.btn.danger{background:rgba(255,107,107,.15);border-color:rgba(255,107,107,.5);color:#ffc9c9}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.transcript{margin-top:12px;max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.msg{padding:8px 10px;border-radius:10px;background:#0b1719;border:1px solid var(--line)}
+.msg b{color:var(--accent2);font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-right:6px}
+.msg.patient b{color:#ffb3b3}
+
+/* Camera */
+.camBox{position:relative;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:4/3}
+.camBox video,.camBox canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.hud{position:absolute;left:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:8px;background:rgba(0,0,0,.55);border:1px solid rgba(54,214,195,.4);color:var(--accent2)}
+.chip.warn{border-color:rgba(245,184,75,.6);color:#ffd9a0}
+.chip.bad{border-color:rgba(255,107,107,.7);color:#ffc9c9}
+.checkOverlay{position:absolute;inset:0;display:none;align-items:flex-end;justify-content:center;padding:18px;background:linear-gradient(transparent 55%,rgba(0,0,0,.7))}
+.checkOverlay.on{display:flex}
+.checkOverlay div{font-size:22px;font-weight:800;text-align:center}
+.checkOverlay span{display:block;font-family:var(--mono);font-size:38px;color:var(--accent)}
+.notes{margin-top:12px;max-height:180px;overflow:auto;font-size:12.5px;color:#bcd3d3;display:flex;flex-direction:column;gap:6px}
+.notes div{border-left:2px solid var(--accent);padding:4px 8px;background:#0b1719;border-radius:0 8px 8px 0}
+
+/* Metrics */
+.metric{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-bottom:1px dashed #1a2d31}
+.metric .lbl{font-size:13px;color:#c4d8d8}
+.metric .val{font-family:var(--mono);font-size:13px;font-weight:600}
+.bar{grid-column:1/3;height:5px;background:#0a1517;border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.bar i.warn{background:var(--warn)} .bar i.bad{background:var(--bad)}
+.sub{font-size:11px;color:var(--muted);margin:14px 0 4px;letter-spacing:1px;text-transform:uppercase;font-weight:700}
+
+/* Vitals */
+.vitals{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.vitals label{font-size:11px;color:var(--muted);font-weight:700;display:flex;flex-direction:column;gap:4px}
+.vitals input{background:#0a1517;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:9px;font-family:var(--mono);font-size:14px}
+.vitals .full{grid-column:1/3}
+.vcard.need{border-color:var(--warn);box-shadow:0 0 0 3px rgba(245,184,75,.2)}
+.flags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+
+/* Start + result */
+.overlay{position:fixed;inset:0;background:rgba(3,8,9,.82);backdrop-filter:blur(8px);display:grid;place-items:center;z-index:20;padding:16px}
+.overlay.hidden{display:none}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:26px;max-width:620px;width:100%;max-height:92vh;overflow:auto}
+.modal h1{margin:0 0 6px;font-size:28px}
+.modal p{color:#bcd3d3;line-height:1.55}
+.warnbox{background:rgba(245,184,75,.1);border:1px solid rgba(245,184,75,.35);color:#ffe2b0;border-radius:12px;padding:12px;font-size:13.5px;line-height:1.5}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
+select{background:#0a1517;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:9px;font-family:inherit}
+.esiBadge{display:flex;align-items:center;gap:16px;padding:16px;border-radius:16px;margin:10px 0 16px}
+.esiBadge .n{font-size:56px;font-weight:800;line-height:1;width:84px;height:84px;border-radius:18px;display:grid;place-items:center;color:#081113}
+.esiBadge .t{font-size:22px;font-weight:800}
+.esiBadge .s{color:#cfe0e0;font-size:13.5px;margin-top:4px}
+.sec{margin:12px 0}
+.sec h4{margin:0 0 6px;font-size:11px;letter-spacing:1.2px;color:var(--muted);text-transform:uppercase}
+.sec div,.sec ul{font-size:14px;line-height:1.5;margin:0;padding-left:18px}
+.sec div{padding-left:0}
+.confirm{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+.stamp{margin-top:10px;padding:10px;border-radius:10px;background:rgba(48,164,108,.12);border:1px solid rgba(48,164,108,.5);font-weight:700;display:none}
+.errbar{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#3a1214;border:1px solid var(--bad);color:#ffd0d0;padding:10px 16px;border-radius:12px;font-size:14px;z-index:30;display:none;max-width:90vw}
+@media (max-width:1100px){main{grid-template-columns:1fr 1fr}.colCam{grid-column:1/3;order:-1}}
+@media (max-width:720px){main{grid-template-columns:1fr;padding:12px}.colCam{grid-column:auto}.poc{display:none}.ring{width:150px;height:150px}}
+@media print{.topbar,.overlay:not(#result),main,.errbar,.noprint{display:none!important}#result{position:static;background:#fff;display:block}.modal{max-height:none;border:none;color:#000;background:#fff}.modal p,.sec div,.sec ul{color:#000}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo">AI</div>
+  <div class="title">ESI Triage Kiosk <small>Proof of concept powered by Claude</small></div>
+  <span class="poc">NOT FOR CLINICAL USE · simulated patients only</span>
+  <span class="timer" id="timer">00:00</span>
+  <button class="btn noprint" id="resetBtn" title="Start over">New patient</button>
+</header>
+
+<main>
+  <!-- Column 1: Ava -->
+  <section class="card">
+    <h3><span class="dot" id="convDot"></span>Triage nurse</h3>
+    <div class="avatarWrap">
+      <div class="ring" id="ring">
+        <svg viewBox="0 0 200 200" aria-label="Ava avatar">
+          <defs>
+            <linearGradient id="skin" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#e8b996"/><stop offset="1" stop-color="#d49d78"/></linearGradient>
+          </defs>
+          <rect width="200" height="200" fill="#10292b"/>
+          <path d="M40 200c4-38 30-58 60-58s56 20 60 58z" fill="#2fb5a6"/>
+          <path d="M84 146l16 20 16-20" fill="none" stroke="#e7f2f1" stroke-width="5" stroke-linejoin="round"/>
+          <rect x="88" y="128" width="24" height="22" fill="url(#skin)"/>
+          <ellipse cx="100" cy="98" rx="42" ry="48" fill="url(#skin)"/>
+          <path d="M56 96c-2-34 18-56 44-56s48 20 44 58c-6-20-18-30-44-34-22 4-38 14-44 32z" fill="#2b1d17"/>
+          <path d="M66 52c8-14 24-20 34-20s26 6 34 20l-6 10H72z" fill="#f4fbfb"/>
+          <rect x="95" y="38" width="10" height="20" rx="2" fill="#e5484d"/><rect x="90" y="43" width="20" height="10" rx="2" fill="#e5484d"/>
+          <g id="eyes">
+            <ellipse cx="84" cy="98" rx="5" ry="6" fill="#2b1d17"/><ellipse cx="116" cy="98" rx="5" ry="6" fill="#2b1d17"/>
+            <circle cx="86" cy="96" r="1.6" fill="#fff"/><circle cx="118" cy="96" r="1.6" fill="#fff"/>
+          </g>
+          <path d="M76 88q8-5 16 0M108 88q8-5 16 0" stroke="#2b1d17" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+          <path d="M100 102q-3 10 2 12" stroke="#b9805e" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <ellipse id="mouth" cx="100" cy="124" rx="10" ry="2.5" fill="#8a3b3b"/>
+          <circle cx="74" cy="114" r="6" fill="#e99a8a" opacity=".35"/><circle cx="126" cy="114" r="6" fill="#e99a8a" opacity=".35"/>
+        </svg>
+      </div>
+      <div class="state" id="stateTxt">Waiting to start</div>
+      <div class="caption"><span class="who" id="capWho">Ava</span><span id="capText">Press Start to begin triage.</span></div>
+      <div class="interim" id="interim"></div>
+      <div class="talkRow">
+        <input id="typeBox" placeholder="Type a reply if voice is unavailable" />
+        <button class="btn" id="sendBtn">Send</button>
+      </div>
+      <div class="talkRow">
+        <button class="btn" id="micBtn" style="flex:1">🎙 Done speaking</button>
+      </div>
+    </div>
+    <div class="transcript" id="transcript"></div>
+  </section>
+
+  <!-- Column 2: Camera -->
+  <section class="card colCam">
+    <h3><span class="dot" id="camDot"></span>Live face scan</h3>
+    <div class="camBox">
+      <video id="video" playsinline muted></video>
+      <canvas id="mesh"></canvas>
+      <div class="hud" id="hud"><span class="chip" id="hudFace">Face: waiting</span></div>
+      <div class="checkOverlay" id="checkOverlay"><div><span id="checkCount">3</span><b id="checkText">Smile</b></div></div>
+    </div>
+    <div class="sub">Ava's clinical notes (nurse view)</div>
+    <div class="notes" id="notes"><div>Notes from each turn appear here.</div></div>
+  </section>
+
+  <!-- Column 3: Metrics + vitals -->
+  <section>
+    <div class="card">
+      <h3>Live measurements</h3>
+      <div class="sub" style="margin-top:0">Face</div>
+      <div id="faceMetrics"></div>
+      <div class="sub">Voice (while patient speaks)</div>
+      <div id="voiceMetrics"></div>
+    </div>
+    <div class="card vcard" id="vcard" style="margin-top:16px">
+      <h3>Vital signs (nurse entry)</h3>
+      <div class="vitals">
+        <label>Age (years)<input id="vAge" type="number" step="0.1" min="0" placeholder="e.g. 45"></label>
+        <label>HR (bpm)<input id="vHR" type="number" placeholder="80"></label>
+        <label>RR (/min)<input id="vRR" type="number" placeholder="16"></label>
+        <label>SpO2 (%)<input id="vSpO2" type="number" placeholder="98"></label>
+        <label>Temp (°C)<input id="vTemp" type="number" step="0.1" placeholder="37.0"></label>
+        <label>BP (sys/dia)<input id="vBP" placeholder="120/80"></label>
+        <label class="full">GCS or AVPU (optional)<input id="vLOC" placeholder="Alert / GCS 15"></label>
+      </div>
+      <div class="flags" id="ruleFlags"></div>
+      <button class="btn primary" id="vitalsBtn" style="width:100%;margin-top:10px">Submit vitals to Ava</button>
+    </div>
+  </section>
+</main>
+
+<!-- Start screen -->
+<div class="overlay" id="start">
+  <div class="modal">
+    <h1>AI Triage Kiosk</h1>
+    <p>Ava will talk with the patient, scan the face continuously, analyze the voice, and combine this with vital signs to suggest an Emergency Severity Index (ESI) level for a nurse to confirm.</p>
+    <div class="warnbox"><b>Proof of concept.</b> Not a medical device and not for clinical decisions. Use only with staff or simulated patients who agree to camera and microphone use. Images and measurements are sent to the Claude API for analysis and are not stored by this app. A registered nurse must confirm every result.</div>
+    <div class="row">
+      <label style="font-size:13px;color:var(--muted);font-weight:700">Language
+        <select id="lang"><option value="en">English</option><option value="ar">العربية (Arabic)</option></select>
+      </label>
+      <label style="font-size:13px;color:var(--muted);font-weight:700;display:flex;gap:6px;align-items:center"><input type="checkbox" id="consent"> Participant agrees to camera and microphone use</label>
+    </div>
+    <div class="row"><button class="btn primary" id="startBtn" disabled style="padding:14px 22px;font-size:16px">Start triage</button></div>
+    <p style="font-size:12px;color:var(--muted)">Best in Chrome or Edge. Allow camera and microphone when asked.</p>
+  </div>
+</div>
+
+<!-- Result -->
+<div class="overlay hidden" id="result">
+  <div class="modal" id="resultBody"></div>
+</div>
+
+<div class="errbar" id="errbar"></div>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = (id) => document.getElementById(id);
+const S = {
+  lang: "en", transcript: [], busy: false, listening: false, speaking: false,
+  stream: null, landmarker: null, du: null, audioCtx: null, analyser: null,
+  faceCheck: null, vitals: null, ruleFlags: null, turns: 0, startTime: 0, done: false,
+  faceHist: [], blinkTimes: [], blinkClosed: false, ema: {}, faceSeen: false,
+  voice: null, utterances: [], noiseRms: 0.01, rec: null, finalText: "", silenceTimer: null,
+  collect: null, lastVideoTime: -1, frame: 0
+};
+
+/* ---------- UI helpers ---------- */
+const ESI_NAMES = {1:"Resuscitation",2:"Emergent",3:"Urgent",4:"Less urgent",5:"Nonurgent"};
+const FACE_ROWS = [["face","Face detected"],["droop","Mouth tilt vs eye line"],["smile","Smile asymmetry"],["brow","Brow asymmetry"],["eye","Eye openness"],["grimace","Pain grimace index"],["blink","Blink rate"]];
+const VOICE_ROWS = [["vstat","Mic"],["pitch","Pitch"],["pvar","Pitch variability"],["vol","Loudness"],["rate","Speech rate"],["pause","Pause ratio"]];
+function buildRows(el, rows){ el.innerHTML = rows.map(([k,l]) => `<div class="metric"><span class="lbl">${l}</span><span class="val" id="m_${k}">--</span><div class="bar"><i id="b_${k}"></i></div></div>`).join(""); }
+buildRows($("faceMetrics"), FACE_ROWS); buildRows($("voiceMetrics"), VOICE_ROWS);
+function setM(k, txt, pct, level){ $("m_"+k).textContent = txt; const b=$("b_"+k); if(!b) return; b.style.width = Math.max(0,Math.min(100,pct||0))+"%"; b.className = level||""; }
+function setState(s, label){ $("ring").className = "ring " + (s||""); $("stateTxt").textContent = label; $("convDot").className = "dot" + (s==="listening"?" live":""); }
+function caption(who, text){ $("capWho").textContent = who; $("capText").textContent = text; }
+function addMsg(role, text){ S.transcript.push({role, text}); const d=document.createElement("div"); d.className="msg "+(role==="ava"?"":"patient"); d.innerHTML=`<b>${role==="ava"?"Ava":"Patient"}</b>`; d.append(document.createTextNode(text)); $("transcript").append(d); $("transcript").scrollTop=1e9; }
+function addNote(t){ if(!t) return; const n=$("notes"); if(n.dataset.init!=="1"){ n.innerHTML=""; n.dataset.init="1"; } const d=document.createElement("div"); d.textContent=t; n.prepend(d); }
+function err(msg){ const e=$("errbar"); e.textContent=msg; e.style.display="block"; clearTimeout(err.t); err.t=setTimeout(()=>e.style.display="none",9000); }
+const median = (a) => { if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; };
+const mean = (a) => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+const r1 = (x,d=1) => x==null||isNaN(x) ? null : Math.round(x*10**d)/10**d;
+const asym = (l,r) => { const s=l+r; return s < 0.15 ? 0 : Math.abs(l-r)/s; };
+
+const T = {
+  en:{smile:"Please give me a big smile and hold it.", brow:"Now raise your eyebrows as high as you can.", thanks:"Thank you, that was perfect.", smileL:"Smile", browL:"Raise eyebrows"},
+  ar:{smile:"من فضلك ابتسم ابتسامة كبيرة واثبت عليها.", brow:"الآن ارفع حاجبيك لأعلى قدر ممكن.", thanks:"شكرا لك، ممتاز.", smileL:"ابتسم", browL:"ارفع الحاجبين"}
+};
+
+/* ---------- Start ---------- */
+$("consent").onchange = () => $("startBtn").disabled = !$("consent").checked;
+$("resetBtn").onclick = () => location.reload();
+$("startBtn").onclick = async () => {
+  S.lang = $("lang").value;
+  $("start").classList.add("hidden");
+  setState("thinking","Starting camera and microphone");
+  try {
+    S.stream = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:640},height:{ideal:480},facingMode:"user"}, audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true} });
+  } catch(e) { err("Camera or microphone permission was denied. You can still type replies."); }
+  if (S.stream) {
+    const v=$("video"); v.srcObject = S.stream; await v.play().catch(()=>{});
+    $("camDot").className="dot live";
+    S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const src = S.audioCtx.createMediaStreamSource(S.stream);
+    S.analyser = S.audioCtx.createAnalyser(); S.analyser.fftSize = 2048; src.connect(S.analyser);
+    initFace();
+  }
+  speechSynthesis.getVoices();
+  S.startTime = Date.now(); setInterval(tick,1000);
+  requestAnimationFrame(loop);
+  callClaude("SESSION START: greet the patient and ask the first question.");
+};
+function tick(){ const s=Math.floor((Date.now()-S.startTime)/1000); $("timer").textContent=String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); }
+
+/* ---------- Face tracking ---------- */
+async function initFace(){
+  try {
+    const fs = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    S.landmarker = await FaceLandmarker.createFromOptions(fs, {
+      baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate:"GPU" },
+      outputFaceBlendshapes:true, runningMode:"VIDEO", numFaces:1
+    });
+    S.du = new DrawingUtils($("mesh").getContext("2d"));
+  } catch(e) { $("hudFace").textContent="Face tracking unavailable"; $("hudFace").className="chip bad"; console.error(e); }
+}
+
+function loop(){
+  S.frame++;
+  const v=$("video");
+  if (S.landmarker && v.readyState>=2 && v.currentTime!==S.lastVideoTime) {
+    S.lastVideoTime=v.currentTime;
+    const c=$("mesh"); if(c.width!==v.videoWidth){ c.width=v.videoWidth; c.height=v.videoHeight; }
+    const res = S.landmarker.detectForVideo(v, performance.now());
+    processFace(res, c);
+  }
+  if (S.analyser && S.frame%2===0) processAudio();
+  animateMouth();
+  requestAnimationFrame(loop);
+}
+
+function processFace(res, c){
+  const ctx=c.getContext("2d"); ctx.clearRect(0,0,c.width,c.height);
+  const lm = res.faceLandmarks && res.faceLandmarks[0];
+  const now = performance.now();
+  if (!lm) { S.faceSeen=false; $("hudFace").textContent="Face: not detected"; $("hudFace").className="chip warn"; setM("face","No",0,"warn"); S.faceHist.push({t:now,present:false}); trimHist(now); return; }
+  S.faceSeen=true;
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {color:"rgba(54,214,195,0.22)", lineWidth:0.6});
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, {color:"#36d6c3", lineWidth:1.6});
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS, {color:"#ff8f8f", lineWidth:1.6});
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE, {color:"#7ce7da", lineWidth:1.4});
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, {color:"#7ce7da", lineWidth:1.4});
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW, {color:"#f5b84b", lineWidth:1.4});
+  S.du.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW, {color:"#f5b84b", lineWidth:1.4});
+
+  const W=c.width, H=c.height, P=(i)=>({x:lm[i].x*W, y:lm[i].y*H});
+  const eL=P(33), eR=P(263), mL=P(61), mR=P(291);
+  ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.setLineDash([4,4]); ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(eL.x,eL.y); ctx.lineTo(eR.x,eR.y); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mR.x,mR.y); ctx.stroke(); ctx.setLineDash([]);
+  const eyeAng = Math.atan2(eR.y-eL.y, eR.x-eL.x), mouthAng = Math.atan2(mR.y-mL.y, mR.x-mL.x);
+  let droop = (mouthAng-eyeAng)*180/Math.PI;
+  const iod = Math.hypot(eR.x-eL.x, eR.y-eL.y);
+  const browL = (P(159).y - P(105).y)/iod, browR = (P(386).y - P(334).y)/iod;
+
+  const bs = {}; (res.faceBlendshapes?.[0]?.categories||[]).forEach(cat => bs[cat.categoryName]=cat.score);
+  const g = (k)=>bs[k]||0;
+  const smileMag = (g("mouthSmileLeft")+g("mouthSmileRight"))/2;
+  const browMag = (g("browOuterUpLeft")+g("browOuterUpRight")+2*g("browInnerUp"))/4;
+  const smileAsym = asym(g("mouthSmileLeft"), g("mouthSmileRight"));
+  const browAsym = asym(g("browOuterUpLeft"), g("browOuterUpRight"));
+  const blink = (g("eyeBlinkLeft")+g("eyeBlinkRight"))/2;
+  const eyeOpen = 1-blink;
+  const grimace = Math.min(100, 100*1.8*(0.3*(g("browDownLeft")+g("browDownRight"))/2 + 0.3*(g("eyeSquintLeft")+g("eyeSquintRight"))/2 + 0.25*(g("noseSneerLeft")+g("noseSneerRight"))/2 + 0.15*(g("mouthUpperUpLeft")+g("mouthUpperUpRight"))/2));
+  const jaw = g("jawOpen");
+
+  if (blink>0.55 && !S.blinkClosed){ S.blinkClosed=true; S.blinkTimes.push(now); }
+  if (blink<0.3) S.blinkClosed=false;
+  S.blinkTimes = S.blinkTimes.filter(t=>now-t<60000);
+  if (!S.blinkStart) S.blinkStart = now;
+  const elapsed = Math.min(60, (now - S.blinkStart)/1000);
+  const blinkRate = elapsed>10 ? S.blinkTimes.length*60/elapsed : null;
+
+  const atRest = jaw<0.08 && smileMag<0.25 && !S.listening;
+  S.faceHist.push({t:now,present:true,droop,grimace,eyeOpen,smileAsym,browAsym,atRest,eyeAsym:Math.abs(g("eyeBlinkLeft")-g("eyeBlinkRight")),browDiff:browL-browR});
+  trimHist(now);
+
+  if (S.collect) S.collect.samples.push({smileMag,browMag,smileAsym,browAsym,droop,browDiff:browL-browR});
+
+  const e = (k,v,a=0.2)=> S.ema[k] = S.ema[k]==null ? v : S.ema[k]*(1-a)+v*a;
+  const dd=e("droop",droop), sa=e("sa",smileAsym), ba=e("ba",browAsym), eo=e("eo",eyeOpen), gr=e("gr",grimace);
+  setM("face","Yes",100,"");
+  setM("droop", r1(dd)+"°", Math.abs(dd)*12, Math.abs(dd)>5?"bad":Math.abs(dd)>3?"warn":"");
+  setM("smile", smileMag>0.25 ? Math.round(sa*100)+"%" : "smile to test", sa*200, sa>0.3?"bad":sa>0.18?"warn":"");
+  setM("brow", browMag>0.25 ? Math.round(ba*100)+"%" : "raise to test", ba*200, ba>0.3?"bad":ba>0.18?"warn":"");
+  setM("eye", Math.round(eo*100)+"%", eo*100, eo<0.45?"warn":"");
+  setM("grimace", Math.round(gr)+"/100", gr, gr>55?"bad":gr>30?"warn":"");
+  setM("blink", blinkRate==null?"measuring":Math.round(blinkRate)+"/min", blinkRate?Math.min(100,blinkRate*2):0, "");
+  $("hudFace").textContent = "Face locked · tilt "+r1(dd)+"°"; $("hudFace").className = Math.abs(dd)>5 ? "chip bad" : "chip";
+}
+function trimHist(now){ while(S.faceHist.length && now-S.faceHist[0].t>20000) S.faceHist.shift(); }
+
+/* ---------- Voice analysis ---------- */
+const abuf = new Float32Array(2048);
+function detectPitch(buf, sr, rms){
+  if (rms<0.01) return -1;
+  const n=buf.length, minLag=Math.floor(sr/400), maxLag=Math.min(Math.floor(sr/70), n-1);
+  let energy=0; for(let i=0;i<n;i++) energy+=buf[i]*buf[i]; energy/=n;
+  let best=-1, bestC=0;
+  for(let lag=minLag; lag<=maxLag; lag++){ let c=0; for(let i=0;i<n-lag;i+=2) c+=buf[i]*buf[i+lag]; c/= (n-lag)/2; if(c>bestC){bestC=c;best=lag;} }
+  if (best<0 || bestC/energy<0.45) return -1;
+  return sr/best;
+}
+function processAudio(){
+  S.analyser.getFloatTimeDomainData(abuf);
+  let s=0; for(let i=0;i<abuf.length;i++) s+=abuf[i]*abuf[i];
+  const rms=Math.sqrt(s/abuf.length);
+  if (!S.listening && !S.speaking) S.noiseRms = S.noiseRms*0.97 + rms*0.03;
+  const thr = Math.max(0.012, S.noiseRms*2.8);
+  const voiced = rms>thr;
+  setM("vstat", S.listening?(voiced?"speech":"listening"):S.speaking?"Ava speaking":"idle", Math.min(100,rms*600), voiced&&S.listening?"":"warn");
+  if (!S.listening || !S.voice) return;
+  const t=performance.now(), V=S.voice;
+  V.frames.push({t,voiced});
+  if (voiced){
+    if (V.first==null) V.first=t; V.last=t;
+    V.db.push(20*Math.log10(rms));
+    const p = detectPitch(abuf, S.audioCtx.sampleRate, rms);
+    if (p>0) V.pitch.push(p);
+  }
+  const pm = median(V.pitch.slice(-30));
+  setM("pitch", pm?Math.round(pm)+" Hz":"--", pm?(pm-70)/3:0, "");
+  const sv = semitoneSD(V.pitch);
+  setM("pvar", sv?r1(sv)+" st":"--", sv?sv*20:0, sv!=null && sv<1.2?"warn":"");
+  const md = mean(V.db.slice(-30));
+  setM("vol", md?Math.round(md)+" dBFS":"--", md?(md+60)*1.8:0, "");
+}
+function semitoneSD(arr){ if(arr.length<8) return null; const m=median(arr); const st=arr.map(p=>12*Math.log2(p/m)).filter(x=>Math.abs(x)<12); const mu=mean(st); return Math.sqrt(mean(st.map(x=>(x-mu)**2))); }
+function startVoiceWindow(){ S.voice={frames:[],db:[],pitch:[],first:null,last:null}; }
+function finishVoiceWindow(text){
+  const V=S.voice; if(!V) return null;
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const span = V.first!=null ? (V.last-V.first)/1000 : 0;
+  const inSpan = V.frames.filter(f=>V.first!=null && f.t>=V.first && f.t<=V.last);
+  const pauseRatio = inSpan.length ? inSpan.filter(f=>!f.voiced).length/inSpan.length : null;
+  let pauses=0, run=0; for(const f of inSpan){ if(!f.voiced){ run++; } else { if(run*33>450) pauses++; run=0; } }
+  const u = { words, speechSeconds:r1(span), wordsPerMinute: span>1?Math.round(words/span*60):null, medianPitchHz: r1(median(V.pitch),0), pitchVariabilitySemitones: r1(semitoneSD(V.pitch)), meanLoudnessDbfs: r1(mean(V.db),0), pauseRatio: r1(pauseRatio,2), longPauses: pauses };
+  S.utterances.push(u); S.voice=null;
+  setM("rate", u.wordsPerMinute?u.wordsPerMinute+" wpm":"--", u.wordsPerMinute?u.wordsPerMinute/2:0, u.wordsPerMinute && u.wordsPerMinute<90?"warn":"");
+  setM("pause", u.pauseRatio!=null?Math.round(u.pauseRatio*100)+"%":"--", (u.pauseRatio||0)*100, u.pauseRatio>0.45?"warn":"");
+  return u;
+}
+
+/* ---------- Speech out (Ava) ---------- */
+function pickVoice(){
+  const vs = speechSynthesis.getVoices();
+  if (S.lang==="ar") return vs.find(v=>v.lang.startsWith("ar")) || null;
+  const pref = ["Microsoft Aria","Microsoft Jenny","Google UK English Female","Samantha","Google US English","Karen","Moira"];
+  for (const p of pref){ const v=vs.find(x=>x.name.includes(p)); if(v) return v; }
+  return vs.find(v=>v.lang.startsWith("en") && /female/i.test(v.name)) || vs.find(v=>v.lang.startsWith("en")) || null;
+}
+function speak(text){
+  return new Promise(resolve => {
+    caption("Ava", text);
+    if (!("speechSynthesis" in window)) return resolve();
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = pickVoice(); if (v) u.voice=v; u.lang = S.lang==="ar"?"ar-AE":"en-US"; u.rate=1; u.pitch=1.05;
+    let done=false; const fin=()=>{ if(done) return; done=true; S.speaking=false; resolve(); };
+    u.onend=fin; u.onerror=fin;
+    S.speaking=true; setState("speaking","Ava is speaking");
+    speechSynthesis.speak(u);
+    setTimeout(fin, 2500 + text.length*85);
+  });
+}
+function animateMouth(){
+  const m=$("mouth");
+  if (S.speaking){ if(S.frame%5===0){ m.setAttribute("ry", (3+Math.random()*7).toFixed(1)); m.setAttribute("rx",(8+Math.random()*4).toFixed(1)); } }
+  else { m.setAttribute("ry","2.5"); m.setAttribute("rx","10"); }
+}
+
+/* ---------- Speech in (patient) ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function listen(){
+  if (S.done) return;
+  S.listening=true; S.finalText=""; startVoiceWindow();
+  setState("listening","Listening… speak now"); $("interim").textContent="";
+  if (!SR){ setState("listening","Type your reply below"); $("typeBox").focus(); return; }
+  const rec = new SR(); S.rec=rec;
+  rec.lang = S.lang==="ar" ? "ar-AE" : "en-US"; rec.interimResults=true; rec.continuous=true;
+  rec.onresult = (e) => {
+    let interim="";
+    for (let i=e.resultIndex;i<e.results.length;i++){ const r=e.results[i]; if(r.isFinal) S.finalText += r[0].transcript+" "; else interim += r[0].transcript; }
+    $("interim").textContent = (S.finalText+interim).trim();
+    clearTimeout(S.silenceTimer);
+    S.silenceTimer = setTimeout(()=>{ if((S.finalText+interim).trim()) submitPatient((S.finalText+interim).trim()); }, 1700);
+  };
+  rec.onerror = (e) => { if (e.error==="not-allowed") err("Microphone blocked for speech recognition. Type replies instead."); };
+  rec.onend = () => { if (S.listening && S.rec===rec){ try{ rec.start(); }catch{} } };
+  try { rec.start(); } catch {}
+}
+function stopListening(){ S.listening=false; clearTimeout(S.silenceTimer); if(S.rec){ const r=S.rec; S.rec=null; try{ r.stop(); }catch{} } }
+function submitPatient(text){
+  if (!S.listening || S.busy || !text) return;
+  stopListening();
+  const u = finishVoiceWindow(text);
+  $("interim").textContent=""; caption("Patient", text);
+  addMsg("patient", text);
+  callClaude(null, u);
+}
+$("micBtn").onclick = () => { const t=($("interim").textContent||"").trim(); if(t) submitPatient(t); };
+$("sendBtn").onclick = () => { const t=$("typeBox").value.trim(); if(!t) return; $("typeBox").value=""; if(!S.listening){ S.listening=true; startVoiceWindow(); } submitPatient(t); };
+$("typeBox").onkeydown = (e)=>{ if(e.key==="Enter") $("sendBtn").click(); };
+
+/* ---------- Face check (smile + brow) ---------- */
+async function collectFor(ms, label){
+  S.collect={samples:[]};
+  $("checkOverlay").classList.add("on"); $("checkText").textContent=label;
+  const end=Date.now()+ms;
+  while(Date.now()<end){ $("checkCount").textContent=Math.ceil((end-Date.now())/1000); await new Promise(r=>setTimeout(r,100)); }
+  const s=S.collect.samples; S.collect=null; $("checkOverlay").classList.remove("on"); return s;
+}
+async function runFaceCheck(){
+  const t=T[S.lang];
+  await speak(t.smile);
+  let snap=null;
+  const smileS = await collectFor(3000, t.smileL);
+  snap = snapshot();
+  await speak(t.brow);
+  const browS = await collectFor(3000, t.browL);
+  await speak(t.thanks);
+  const sm = smileS.filter(x=>x.smileMag>0.3), br = browS.filter(x=>x.browMag>0.25);
+  const smileAsymM=median(sm.map(x=>x.smileAsym)), droopM=median(sm.map(x=>x.droop)), browAsymM=median(br.map(x=>x.browAsym)), browDiffM=median(br.map(x=>x.browDiff));
+  S.faceCheck = {
+    smileTest: { framesWithAdequateEffort: sm.length, smileAsymmetryPct: smileAsymM==null?null:Math.round(smileAsymM*100), mouthTiltDuringSmileDeg: r1(droopM), maxEffort: r1(Math.max(0,...smileS.map(x=>x.smileMag)),2) },
+    browTest: { framesWithAdequateEffort: br.length, browAsymmetryPct: browAsymM==null?null:Math.round(browAsymM*100), browHeightDifferenceIOD: r1(browDiffM,3) },
+    screenFlag: (smileAsymM>0.3 || Math.abs(droopM||0)>5) ? "POSSIBLE LOWER FACIAL ASYMMETRY" : (browAsymM>0.35 ? "POSSIBLE UPPER FACE ASYMMETRY" : (sm.length<5 ? "INCONCLUSIVE, low effort or face not tracked" : "No significant asymmetry measured")),
+    note: "Reference thresholds are PoC heuristics, not validated."
+  };
+  addNote("Face check: " + S.faceCheck.screenFlag + ` (smile asym ${S.faceCheck.smileTest.smileAsymmetryPct ?? "n/a"}%, tilt ${S.faceCheck.smileTest.mouthTiltDuringSmileDeg ?? "n/a"}°, brow asym ${S.faceCheck.browTest.browAsymmetryPct ?? "n/a"}%)`);
+  callClaude("FACE CHECK COMPLETED. Results are in sensor data under faceCheck. Continue the interview.", null, snap);
+}
+
+/* ---------- Snapshot ---------- */
+function snapshot(){
+  const v=$("video"); if(!v.videoWidth) return null;
+  const c=document.createElement("canvas"); const w=384; c.width=w; c.height=Math.round(v.videoHeight*w/v.videoWidth);
+  c.getContext("2d").drawImage(v,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.7);
+}
+
+/* ---------- Sensor summary ---------- */
+function sensorSummary(lastUtterance){
+  const h=S.faceHist, pres=h.filter(x=>x.present), rest=pres.filter(x=>x.atRest);
+  const face = h.length ? {
+    windowSeconds: 20,
+    faceDetectedPct: Math.round(pres.length/h.length*100),
+    restingMouthTiltDegMedian: r1(median(rest.map(x=>x.droop))),
+    restingMouthTiltDegAbsMax: r1(rest.length?Math.max(...rest.map(x=>Math.abs(x.droop))):null),
+    painGrimaceIndexMean: r1(mean(pres.map(x=>x.grimace)),0),
+    painGrimaceIndexMax: r1(pres.length?Math.max(...pres.map(x=>x.grimace)):null,0),
+    eyeOpennessPctMean: pres.length ? r1(mean(pres.map(x=>x.eyeOpen))*100,0) : null,
+    eyeClosureAsymmetryMean: r1(mean(pres.map(x=>x.eyeAsym)),2),
+    blinkRatePerMin: S.blinkTimes.length
+  } : { status: "no camera data" };
+  const all=S.utterances;
+  return {
+    face, faceCheck: S.faceCheck,
+    voice: { lastUtterance: lastUtterance||null, sessionAvgWpm: r1(mean(all.map(u=>u.wordsPerMinute).filter(Boolean)),0), sessionAvgPitchVariabilitySt: r1(mean(all.map(u=>u.pitchVariabilitySemitones).filter(x=>x!=null))), utterances: all.length },
+    notes: "Mouth tilt = angle between mouth corner line and eye corner line; healthy faces usually within about 3 degrees. Pitch variability under ~1.2 semitones suggests flat or monotone speech."
+  };
+}
+
+/* ---------- Vitals + rule engine ---------- */
+function readVitals(){
+  const n=(id)=>{ const v=parseFloat($(id).value); return isNaN(v)?null:v; };
+  const bp=($("vBP").value||"").split("/").map(x=>parseInt(x));
+  return { ageYears:n("vAge"), heartRate:n("vHR"), respRate:n("vRR"), spo2:n("vSpO2"), tempC:n("vTemp"), sbp:isNaN(bp[0])?null:bp[0], dbp:isNaN(bp[1])?null:bp[1], loc:$("vLOC").value||null };
+}
+function ruleEngine(v){
+  const f=[]; const a=v.ageYears;
+  let hrMax=100, rrMax=20, band="adult or over 8 years";
+  if (a!=null){ if(a<0.25){hrMax=180;rrMax=50;band="under 3 months";} else if(a<3){hrMax=160;rrMax=40;band="3 months to 3 years";} else if(a<8){hrMax=140;rrMax=30;band="3 to 8 years";} }
+  if (v.heartRate!=null && v.heartRate>hrMax) f.push(`HR ${v.heartRate} > ${hrMax}`);
+  if (v.respRate!=null && v.respRate>rrMax) f.push(`RR ${v.respRate} > ${rrMax}`);
+  if (v.spo2!=null && v.spo2<92) f.push(`SpO2 ${v.spo2}% < 92%`);
+  const other=[];
+  if (v.tempC!=null && v.tempC>=38) other.push(`Fever ${v.tempC}°C` + (a!=null && a<0.08 ? " in neonate (ESI 2 rule)" : ""));
+  if (v.sbp!=null && v.sbp<90) other.push(`SBP ${v.sbp} < 90`);
+  if (v.sbp!=null && v.sbp>=180) other.push(`SBP ${v.sbp} very high`);
+  return { ageBand: band, dangerZone: f, otherConcerns: other };
+}
+function renderFlags(r){
+  $("ruleFlags").innerHTML = [...r.dangerZone.map(x=>`<span class="chip bad">Danger zone: ${x}</span>`), ...r.otherConcerns.map(x=>`<span class="chip warn">${x}</span>`)].join("") || `<span class="chip">No danger zone vitals</span>`;
+}
+$("vitalsBtn").onclick = () => {
+  const v=readVitals();
+  if (v.heartRate==null && v.respRate==null && v.spo2==null){ err("Enter at least HR, RR or SpO2."); return; }
+  S.vitals=v; S.ruleFlags=ruleEngine(v); renderFlags(S.ruleFlags); $("vcard").classList.remove("need");
+  addNote("Vitals entered: " + JSON.stringify(v).replace(/[{}"]/g,"").replace(/,/g,", "));
+  if (S.done) return;
+  stopListening();
+  callClaude("VITAL SIGNS ENTERED by the nurse. If you have enough information, complete the triage now.", null, snapshot());
+};
+
+/* ---------- Claude call ---------- */
+async function callClaude(event, lastUtterance, snap){
+  if (S.busy) return;
+  S.busy=true; S.turns++;
+  setState("thinking","Ava is thinking");
+  const useSnap = snap || ((S.turns===2 || S.turns%3===0) ? snapshot() : null);
+  try {
+    const res = await fetch("/api/triage", { method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({ transcript:S.transcript, sensors:sensorSummary(lastUtterance), vitals:S.vitals, ruleFlags:S.ruleFlags, snapshot:useSnap, lang:S.lang, event }) });
+    const data = await res.json();
+    S.busy=false;
+    if (!res.ok || data.error){ err((data.error||"Server error")+(data.detail?": "+data.detail:"")); setState("","Error, try again"); caption("System","Something went wrong. Type a reply or press New patient."); S.listening=true; startVoiceWindow(); return; }
+    addNote(data.observations);
+    addMsg("ava", data.say);
+    await speak(data.say);
+    if (data.action==="face_check") return runFaceCheck();
+    if (data.action==="request_vitals"){ $("vcard").classList.add("need"); $("vcard").scrollIntoView({behavior:"smooth",block:"center"}); setState("","Waiting for nurse to enter vitals"); return; }
+    if (data.action==="complete" && data.esi){ S.done=true; setState("","Triage complete"); return showResult(data.esi); }
+    listen();
+  } catch(e){ S.busy=false; err("Network error: "+e.message); setState("","Connection problem"); S.listening=true; startVoiceWindow(); }
+}
+
+/* ---------- Result ---------- */
+const esc = (s)=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const list = (a)=> Array.isArray(a)&&a.length ? "<ul>"+a.map(x=>`<li>${esc(x)}</li>`).join("")+"</ul>" : "<div>None</div>";
+function showResult(e){
+  const lvl=Math.max(1,Math.min(5,parseInt(e.level)||3)), col=`var(--esi${lvl})`;
+  $("resultBody").innerHTML = `
+    <h1>Suggested triage</h1>
+    <div class="esiBadge" style="background:color-mix(in srgb, ${col} 14%, transparent);border:1px solid ${col}">
+      <div class="n" style="background:${col}">${lvl}</div>
+      <div><div class="t">ESI ${lvl} · ${ESI_NAMES[lvl]}</div><div class="s">Decision point ${esc(e.decision_point)}: ${esc(e.decision_reason)}</div><div class="s">AI confidence: ${esc(e.confidence)}</div></div>
+    </div>
+    <div class="sec"><h4>Patient summary</h4><div>${esc(e.patient_summary)}</div></div>
+    <div class="sec"><h4>Red flags</h4>${list(e.red_flags)}</div>
+    <div class="sec"><h4>Predicted resources</h4>${list(e.predicted_resources)}</div>
+    <div class="sec"><h4>Danger zone vitals</h4><div>${esc(e.danger_zone_vitals)}</div></div>
+    <div class="sec"><h4>BE FAST stroke screen</h4><div>${esc(e.be_fast_screen)}</div></div>
+    <div class="sec"><h4>Face and voice findings</h4><div>${esc(e.sensor_findings)}</div></div>
+    <div class="sec"><h4>Recommended nursing actions</h4>${list(e.recommended_actions)}</div>
+    <div class="confirm noprint">
+      <h4 style="margin:0 0 8px;font-size:11px;letter-spacing:1.2px;color:var(--muted);text-transform:uppercase">Nurse confirmation (required)</h4>
+      <div class="row" style="margin-top:0">
+        <button class="btn primary" id="confBtn">Confirm ESI ${lvl}</button>
+        <select id="ovSel"><option value="">Override to…</option>${[1,2,3,4,5].map(n=>`<option value="${n}">ESI ${n}</option>`).join("")}</select>
+        <input id="ovWhy" placeholder="Reason for override" style="flex:1;min-width:160px;background:#0a1517;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:9px">
+        <button class="btn" id="ovBtn">Save override</button>
+      </div>
+    </div>
+    <div class="stamp" id="stamp"></div>
+    <div class="sec"><h4>Transcript</h4><div style="font-size:12.5px">${S.transcript.map(t=>`<b>${t.role==="ava"?"Ava":"Patient"}:</b> ${esc(t.text)}`).join("<br>")}</div></div>
+    <p style="font-size:12px;color:var(--muted)">Proof of concept output generated ${new Date().toLocaleString()}. Not for clinical use.</p>
+    <div class="row noprint"><button class="btn" id="printBtn">Print or save PDF</button><button class="btn" id="backBtn">Back to kiosk</button><button class="btn primary" id="newBtn">New patient</button></div>`;
+  $("result").classList.remove("hidden");
+  const stamp=(txt)=>{ const s=$("stamp"); s.style.display="block"; s.textContent=txt+" · "+new Date().toLocaleTimeString(); };
+  $("confBtn").onclick=()=>stamp(`Confirmed by nurse: ESI ${lvl}`);
+  $("ovBtn").onclick=()=>{ const v=$("ovSel").value; if(!v) return err("Choose an ESI level to override."); stamp(`Nurse override: ESI ${v} (AI suggested ${lvl}). Reason: ${$("ovWhy").value||"not given"}`); };
+  $("printBtn").onclick=()=>window.print();
+  $("backBtn").onclick=()=>$("result").classList.add("hidden");
+  $("newBtn").onclick=()=>location.reload();
+}
+</script>
+</body>
+</html>

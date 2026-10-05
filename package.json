@@ -1,0 +1,6 @@
+{
+  "name": "esi-triage-kiosk",
+  "private": true,
+  "type": "module",
+  "devDependencies": { "@netlify/functions": "^2.8.0" }
+}
