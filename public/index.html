@@ -271,14 +271,17 @@ $("startBtn").onclick = async () => {
   $("start").classList.add("hidden");
   setState("thinking","Starting camera and microphone");
   try {
-    S.stream = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:640},height:{ideal:480},facingMode:"user"}, audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true} });
+    S.stream = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:640},height:{ideal:480},facingMode:"user"}, audio: IS_MOBILE ? false : {echoCancellation:true,noiseSuppression:true,autoGainControl:true} });
+    if (IS_MOBILE){ ["pitch","pvar","vol"].forEach(k=>setM(k,"laptop only",0,"")); setM("vstat","speech recognizer",0,""); }
   } catch(e) { err("Camera or microphone permission was denied. You can still type replies."); }
   if (S.stream) {
     const v=$("video"); v.srcObject = S.stream; await v.play().catch(()=>{});
     $("camDot").className="dot live";
-    S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    const src = S.audioCtx.createMediaStreamSource(S.stream);
-    S.analyser = S.audioCtx.createAnalyser(); S.analyser.fftSize = 2048; src.connect(S.analyser);
+    if (!IS_MOBILE && S.stream.getAudioTracks().length){
+      S.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      const src = S.audioCtx.createMediaStreamSource(S.stream);
+      S.analyser = S.audioCtx.createAnalyser(); S.analyser.fftSize = 2048; src.connect(S.analyser);
+    }
     await Promise.race([initFace(), new Promise(r=>setTimeout(r,8000))]);
   }
   speechSynthesis.getVoices();
@@ -481,20 +484,31 @@ function animateMouth(){
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 function listen(){
   if (S.done) return;
-  S.listening=true; S.finalText=""; startVoiceWindow();
+  S.listening=true; S.finalText=""; S.lastInterim=""; startVoiceWindow();
   setState("listening","Listening… speak now"); $("interim").textContent="";
   if (!SR){ setState("listening","Type your reply below"); $("typeBox").focus(); return; }
   const rec = new SR(); S.rec=rec;
-  rec.lang = S.lang==="ar" ? "ar-AE" : "en-US"; rec.interimResults=true; rec.continuous=true;
+  rec.lang = S.lang==="ar" ? "ar-AE" : "en-US"; rec.interimResults=true; rec.continuous=!IS_MOBILE; rec.maxAlternatives=1;
   rec.onresult = (e) => {
+    if (!S.analyser && S.voice){ const t=performance.now(); if(S.voice.first==null) S.voice.first=t; S.voice.last=t; }
     let interim="";
     for (let i=e.resultIndex;i<e.results.length;i++){ const r=e.results[i]; if(r.isFinal) S.finalText += r[0].transcript+" "; else interim += r[0].transcript; }
+    S.lastInterim = interim;
     $("interim").textContent = (S.finalText+interim).trim();
     clearTimeout(S.silenceTimer);
     S.silenceTimer = setTimeout(()=>{ if((S.finalText+interim).trim()) submitPatient((S.finalText+interim).trim()); }, 1700);
   };
-  rec.onerror = (e) => { if (e.error==="not-allowed") err("Microphone blocked for speech recognition. Type replies instead."); };
-  rec.onend = () => { if (S.listening && S.rec===rec){ try{ rec.start(); }catch{} } };
+  rec.onerror = (e) => {
+    if (e.error==="no-speech" || e.error==="aborted") return;
+    const msg = {"not-allowed":"Microphone blocked. Allow mic access for this site, or type replies.","audio-capture":"Microphone busy or unavailable. Close other apps using the mic.","network":"Speech service needs internet (Google speech). Check connection.","language-not-supported":"This language is not supported by the phone's speech service."}[e.error] || ("Speech recognition error: "+e.error);
+    err(msg);
+  };
+  rec.onend = () => {
+    if (!(S.listening && S.rec===rec)) return;
+    // phones end after each phrase: keep any unfinished words, then restart listening
+    if (S.lastInterim){ S.finalText += S.lastInterim+" "; S.lastInterim=""; }
+    setTimeout(()=>{ if (S.listening && S.rec===rec){ try{ rec.start(); }catch{} } }, 150);
+  };
   try { rec.start(); } catch {}
 }
 function stopListening(){ S.listening=false; clearTimeout(S.silenceTimer); if(S.rec){ const r=S.rec; S.rec=null; try{ r.stop(); }catch{} } }
@@ -564,7 +578,7 @@ function sensorSummary(lastUtterance){
   const all=S.utterances;
   return {
     face, faceCheck: S.faceCheck,
-    voice: { lastUtterance: lastUtterance||null, sessionAvgWpm: r1(mean(all.map(u=>u.wordsPerMinute).filter(Boolean)),0), sessionAvgPitchVariabilitySt: r1(mean(all.map(u=>u.pitchVariabilitySemitones).filter(x=>x!=null))), utterances: all.length },
+    voice: { device: S.analyser ? "full acoustic analysis" : "phone: transcript timing only, pitch and loudness not measured", lastUtterance: lastUtterance||null, sessionAvgWpm: r1(mean(all.map(u=>u.wordsPerMinute).filter(Boolean)),0), sessionAvgPitchVariabilitySt: r1(mean(all.map(u=>u.pitchVariabilitySemitones).filter(x=>x!=null))), utterances: all.length },
     notes: "Mouth tilt = angle between mouth corner line and eye corner line; healthy faces usually within about 3 degrees. Pitch variability under ~1.2 semitones suggests flat or monotone speech."
   };
 }
