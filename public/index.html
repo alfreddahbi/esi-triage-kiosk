@@ -21,8 +21,17 @@ button{font-family:inherit;cursor:pointer}
 .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#1a8f86);display:grid;place-items:center;font-weight:800;color:#04201d}
 .title{font-weight:800;letter-spacing:.2px}
 .title small{display:block;font-weight:500;color:var(--muted);font-size:12px}
-.poc{margin-left:auto;font-size:12px;font-weight:700;color:#ffd9a0;background:rgba(245,184,75,.12);border:1px solid rgba(245,184,75,.35);padding:6px 10px;border-radius:999px}
+.poc{font-size:12px;font-weight:700;color:#ffd9a0;background:rgba(245,184,75,.12);border:1px solid rgba(245,184,75,.35);padding:6px 10px;border-radius:999px}
 .timer{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.esiTop{display:flex;align-items:center;gap:8px;padding:5px 10px 5px 5px;border-radius:12px;border:1px solid var(--line);background:var(--panel2)}
+.esiTop .n{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:800;font-size:20px;background:#22393d;color:var(--muted)}
+.esiTop .l{font-size:11px;line-height:1.25;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.6px}
+.esiTop .l b{display:block;color:var(--text);font-size:13px;text-transform:none;letter-spacing:0}
+.esiTop.final{box-shadow:0 0 0 2px var(--c)}
+.measuring{display:none;align-items:center;gap:10px;margin-bottom:10px;padding:10px;border-radius:12px;background:rgba(54,214,195,.08);border:1px solid rgba(54,214,195,.35);font-size:13px;font-weight:700}
+.measuring.on{display:flex}
+.heart{font-size:22px;animation:beat 1s infinite}
+@keyframes beat{0%,100%{transform:scale(1)}15%{transform:scale(1.25)}30%{transform:scale(1)}45%{transform:scale(1.15)}}
 main{display:grid;grid-template-columns:minmax(280px,1fr) minmax(360px,1.35fr) minmax(300px,1fr);gap:16px;padding:16px 20px;max-width:1600px;margin:0 auto}
 .card{background:linear-gradient(180deg,var(--panel),#0c1719);border:1px solid var(--line);border-radius:18px;padding:16px;position:relative}
 .card h3{margin:0 0 12px;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:8px}
@@ -109,7 +118,7 @@ select{background:#0a1517;border:1px solid var(--line);color:var(--text);border-
 .stamp{margin-top:10px;padding:10px;border-radius:10px;background:rgba(48,164,108,.12);border:1px solid rgba(48,164,108,.5);font-weight:700;display:none}
 .errbar{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#3a1214;border:1px solid var(--bad);color:#ffd0d0;padding:10px 16px;border-radius:12px;font-size:14px;z-index:30;display:none;max-width:90vw}
 @media (max-width:1100px){main{grid-template-columns:1fr 1fr}.colCam{grid-column:1/3;order:-1}}
-@media (max-width:720px){main{grid-template-columns:1fr;padding:12px}.colCam{grid-column:auto;order:0}.camBox{aspect-ratio:3/4;max-height:52vh;margin:0 auto}.poc{display:none}.ring{width:150px;height:150px}}
+@media (max-width:720px){.esiTop .l{display:none}.timer{display:none}main{grid-template-columns:1fr;padding:12px}.colCam{grid-column:auto;order:0}.camBox{aspect-ratio:3/4;max-height:52vh;margin:0 auto}.poc{display:none}.ring{width:150px;height:150px}}
 @media print{.topbar,.overlay:not(#result),main,.errbar,.noprint{display:none!important}#result{position:static;background:#fff;display:block}.modal{max-height:none;border:none;color:#000;background:#fff}.modal p,.sec div,.sec ul{color:#000}}
 </style>
 </head>
@@ -119,6 +128,7 @@ select{background:#0a1517;border:1px solid var(--line);color:var(--text);border-
   <div class="logo">AI</div>
   <div class="title">ESI Triage Kiosk <small>Proof of concept powered by Claude</small></div>
   <span class="poc">NOT FOR CLINICAL USE · simulated patients only</span>
+  <div class="esiTop" id="esiTop" style="margin-left:auto"><div class="n" id="esiTopN">?</div><div class="l">ESI<b id="esiTopL">Assessing</b></div></div>
   <span class="timer" id="timer">00:00</span>
   <button class="btn noprint" id="resetBtn" title="Start over">New patient</button>
 </header>
@@ -189,6 +199,8 @@ select{background:#0a1517;border:1px solid var(--line);color:var(--text);border-
     </div>
     <div class="card vcard" id="vcard" style="margin-top:16px">
       <h3>Vital signs (nurse entry)</h3>
+      <div class="measuring" id="measuring"><span class="heart">❤️</span><span>Checking vital signs… keep still. Nurse enters readings below.</span></div>
+      <button class="btn" id="vstartBtn" style="width:100%;margin-bottom:10px">Start vitals check</button>
       <div class="vitals">
         <label>Age (years)<input id="vAge" type="number" step="0.1" min="0" placeholder="e.g. 45"></label>
         <label>HR (bpm)<input id="vHR" type="number" placeholder="80"></label>
@@ -249,6 +261,13 @@ function buildRows(el, rows){ el.innerHTML = rows.map(([k,l]) => `<div class="me
 buildRows($("faceMetrics"), FACE_ROWS); buildRows($("voiceMetrics"), VOICE_ROWS);
 function setM(k, txt, pct, level){ $("m_"+k).textContent = txt; const b=$("b_"+k); if(!b) return; b.style.width = Math.max(0,Math.min(100,pct||0))+"%"; b.className = level||""; }
 function setState(s, label){ $("ring").className = "ring " + (s||""); $("stateTxt").textContent = label; $("convDot").className = "dot" + (s==="listening"?" live":""); }
+function setTopESI(level, label, final){
+  const box=$("esiTop"), n=$("esiTopN");
+  if (!level){ n.textContent="?"; n.style.background=""; n.style.color=""; $("esiTopL").textContent=label||"Assessing"; return; }
+  const col=`var(--esi${level})`;
+  n.textContent=level; n.style.background=col; n.style.color="#081113";
+  $("esiTopL").textContent=label; box.classList.toggle("final",!!final); box.style.setProperty("--c",col);
+}
 function caption(who, text){ $("capWho").textContent = who; $("capText").textContent = text; }
 function addMsg(role, text){ S.transcript.push({role, text}); const d=document.createElement("div"); d.className="msg "+(role==="ava"?"":"patient"); d.innerHTML=`<b>${role==="ava"?"Ava":"Patient"}</b>`; d.append(document.createTextNode(text)); $("transcript").append(d); $("transcript").scrollTop=1e9; }
 function addNote(t){ if(!t) return; const n=$("notes"); if(n.dataset.init!=="1"){ n.innerHTML=""; n.dataset.init="1"; } const d=document.createElement("div"); d.textContent=t; n.prepend(d); }
@@ -605,10 +624,17 @@ function ruleEngine(v){
 function renderFlags(r){
   $("ruleFlags").innerHTML = [...r.dangerZone.map(x=>`<span class="chip bad">Danger zone: ${x}</span>`), ...r.otherConcerns.map(x=>`<span class="chip warn">${x}</span>`)].join("") || `<span class="chip">No danger zone vitals</span>`;
 }
+const VT = { en:"I will now check your vital signs. Please sit still, rest your arm, and breathe normally.", ar:"سأقوم الآن بقياس علاماتك الحيوية. من فضلك اجلس بهدوء وأرح ذراعك وتنفس بشكل طبيعي." };
+function showMeasuring(on){ $("measuring").classList.toggle("on",on); $("vcard").classList.toggle("need",on); if(on){ setState("","Checking vital signs"); $("vcard").scrollIntoView({behavior:"smooth",block:"center"}); } }
+$("vstartBtn").onclick = async () => {
+  if (S.done || S.busy) return;
+  stopListening(); S.vitalsPending=true;
+  addMsg("ava", VT[S.lang]); await speak(VT[S.lang]); showMeasuring(true);
+};
 $("vitalsBtn").onclick = () => {
   const v=readVitals();
   if (v.heartRate==null && v.respRate==null && v.spo2==null){ err("Enter at least HR, RR or SpO2."); return; }
-  S.vitals=v; S.ruleFlags=ruleEngine(v); renderFlags(S.ruleFlags); $("vcard").classList.remove("need");
+  S.vitals=v; S.ruleFlags=ruleEngine(v); renderFlags(S.ruleFlags); showMeasuring(false); S.vitalsPending=false;
   addNote("Vitals entered: " + JSON.stringify(v).replace(/[{}"]/g,"").replace(/,/g,", "));
   if (S.done) return;
   stopListening();
@@ -628,11 +654,12 @@ async function callClaude(event, lastUtterance, snap){
     S.busy=false;
     if (!res.ok || data.error){ err((data.error||"Server error")+(data.detail?": "+data.detail:"")); setState("","Error, try again"); caption("System","Something went wrong. Type a reply or press New patient."); S.listening=true; startVoiceWindow(); return; }
     addNote(data.observations);
+    const pe=parseInt(data.provisional_esi); if (pe>=1 && pe<=5 && data.action!=="complete") setTopESI(pe,"Provisional");
     addMsg("ava", data.say);
     await speak(data.say);
     if (data.action==="face_check") return runFaceCheck();
-    if (data.action==="request_vitals"){ $("vcard").classList.add("need"); $("vcard").scrollIntoView({behavior:"smooth",block:"center"}); setState("","Waiting for nurse to enter vitals"); return; }
-    if (data.action==="complete" && data.esi){ S.done=true; setState("","Triage complete"); return showResult(data.esi); }
+    if (data.action==="request_vitals"){ S.vitalsPending=true; showMeasuring(true); return; }
+    if (data.action==="complete" && data.esi){ S.done=true; setState("","Triage complete"); showMeasuring(false); return showResult(data.esi); }
     listen();
   } catch(e){ S.busy=false; err("Network error: "+e.message); setState("","Connection problem"); S.listening=true; startVoiceWindow(); }
 }
@@ -669,9 +696,10 @@ function showResult(e){
     <p style="font-size:12px;color:var(--muted)">Proof of concept output generated ${new Date().toLocaleString()}. Not for clinical use.</p>
     <div class="row noprint"><button class="btn" id="printBtn">Print or save PDF</button><button class="btn" id="backBtn">Back to kiosk</button><button class="btn primary" id="newBtn">New patient</button></div>`;
   $("result").classList.remove("hidden");
+  setTopESI(lvl,"AI suggested · confirm",true);
   const stamp=(txt)=>{ const s=$("stamp"); s.style.display="block"; s.textContent=txt+" · "+new Date().toLocaleTimeString(); };
-  $("confBtn").onclick=()=>stamp(`Confirmed by nurse: ESI ${lvl}`);
-  $("ovBtn").onclick=()=>{ const v=$("ovSel").value; if(!v) return err("Choose an ESI level to override."); stamp(`Nurse override: ESI ${v} (AI suggested ${lvl}). Reason: ${$("ovWhy").value||"not given"}`); };
+  $("confBtn").onclick=()=>{ stamp(`Confirmed by nurse: ESI ${lvl}`); setTopESI(lvl,"Nurse confirmed",true); };
+  $("ovBtn").onclick=()=>{ const v=$("ovSel").value; if(!v) return err("Choose an ESI level to override."); stamp(`Nurse override: ESI ${v} (AI suggested ${lvl}). Reason: ${$("ovWhy").value||"not given"}`); setTopESI(parseInt(v),"Nurse override",true); };
   $("printBtn").onclick=()=>window.print();
   $("backBtn").onclick=()=>$("result").classList.add("hidden");
   $("newBtn").onclick=()=>location.reload();
