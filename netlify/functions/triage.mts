@@ -28,9 +28,16 @@ Fever in infants under 28 days is ESI 2 regardless.
 
 Escalation: if at ANY time the patient reports or sensors suggest an immediate life threat or a stroke (for example sudden facial droop with slurred speech, severe chest pain with sweating, cannot breathe, suicidal intent), skip remaining questions: say an urgent, reassuring line ("I am calling a nurse to you right now.") and use action "complete" immediately with your best ESI estimate and red_flags filled. Vitals may be missing in that case.
 
+Patients who cannot talk well: a stroke, hypoglycemia, intoxication or severe illness often leaves the patient unable to give a normal history. Treat these as CLINICAL FINDINGS, not as a reason to keep asking:
+ . KIOSK EVENT "NO RESPONSE" means the patient did not answer. First time, ask one very simple yes or no question ("Can you hear me? Say yes or nod."). If it happens again, or the patient had already seemed confused, escalate immediately (new altered mental status or possible aphasia is ESI 2; unresponsive is ESI 1).
+ . Garbled, nonsense, wrong word or very fragmentary transcripts can mean dysarthria or aphasia (speech recognition also mangles slurred speech). Very low speech rate, long pauses and flat pitch support this.
+ . Answers that do not fit the question suggest confusion.
+ . If you suspect a stroke, switch to short BE FAST yes or no questions (sudden weakness or numbness on one side? trouble speaking? when did it start, or when were you last normal?), run the face check early, then escalate. Never make a struggling patient repeat a long history.
+ . Include the time last known well in the summary if you got it.
+
 Sensor data: each turn includes measurements from the kiosk (face mesh blendshapes, symmetry angles, a pain grimace index, and voice features such as pitch variability, speech rate and pauses), plus sometimes a camera snapshot. Treat these as SUPPORTING cues only. They are unvalidated. Never assign ESI 1 or 2 from sensor data alone without supporting history, but DO ask a clarifying question if sensors look concerning (for example "Have you noticed any weakness or numbness on one side?"). Mouth movement while talking can distort symmetry, so trust the dedicated face check most. Do not describe the patient's appearance in a way that could upset them.
 
-OUTPUT FORMAT: reply with ONLY a single JSON object, no markdown, no code fences:
+OUTPUT FORMAT: reply with ONLY a single JSON object, no markdown, no code fences. Keep "observations" under 40 words and every esi text field concise, so the reply is never cut off:
 {
   "say": "what Ava speaks next",
   "action": "ask" | "face_check" | "request_vitals" | "complete",
@@ -52,6 +59,15 @@ OUTPUT FORMAT: reply with ONLY a single JSON object, no markdown, no code fences
   }
 }
 "esi" must be null unless action is "complete".`;
+}
+
+function salvage(text: string) {
+  // Recover the key fields from a truncated or malformed reply
+  const str = (k: string) => { const m = text.match(new RegExp('"' + k + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"')); return m ? m[1].replace(/\\"/g, '"') : null; };
+  const num = (k: string) => { const m = text.match(new RegExp('"' + k + '"\\s*:\\s*(\\d)')); return m ? parseInt(m[1]) : null; };
+  const say = str("say");
+  if (!say) return null;
+  return { say, action: str("action") || "ask", provisional_esi: num("provisional_esi"), observations: str("observations") || "", esi: null, salvaged: true };
 }
 
 function extractJson(text: string) {
@@ -107,8 +123,7 @@ export default async (req: Request, context: Context) => {
   }
   content.push({ type: "text", text: parts.join("\n\n") });
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const callClaude = (maxTokens: number) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": apiKey,
@@ -117,24 +132,39 @@ export default async (req: Request, context: Context) => {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1200,
+        max_tokens: maxTokens,
         system: buildSystemPrompt(lang),
         messages: [{ role: "user", content }],
       }),
     });
 
+  try {
+    let res = await callClaude(3000);
     if (!res.ok) {
       const errText = await res.text();
       return Response.json({ error: `Claude API error ${res.status}`, detail: errText.slice(0, 500) }, { status: 502 });
     }
 
-    const data = await res.json();
-    const text = (data.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-    let parsed;
+    let data = await res.json();
+    let text = (data.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+    let parsed: any;
     try {
       parsed = extractJson(text);
     } catch {
-      parsed = { say: text.slice(0, 300), action: "ask", observations: "", esi: null };
+      // Retry once with more room, then fall back to salvaging the spoken line
+      const retry = await callClaude(6000);
+      if (retry.ok) {
+        data = await retry.json();
+        text = (data.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+        try { parsed = extractJson(text); } catch { parsed = salvage(text); }
+      } else {
+        parsed = salvage(text);
+      }
+      if (!parsed) parsed = { say: "Sorry, could you say that again?", action: "ask", observations: "Model reply could not be read.", esi: null };
+      if (parsed.salvaged && parsed.action === "complete") {
+        const lvl = parsed.provisional_esi || 2;
+        parsed.esi = { level: lvl, decision_point: lvl <= 2 ? "B" : "C", decision_reason: "Ava escalated; full rationale was not received, nurse to assess now.", chief_complaint: "", patient_summary: "Escalated by Ava. See transcript.", red_flags: ["Escalation triggered during interview"], predicted_resources: [], danger_zone_vitals: "not assessed", be_fast_screen: "see transcript", sensor_findings: parsed.observations || "", recommended_actions: ["Immediate nurse assessment"], confidence: "low" };
+      }
     }
     return Response.json({ ...parsed, model, usage: data.usage });
   } catch (e: any) {
